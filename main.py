@@ -29,7 +29,6 @@ def main():
         paginate()
 
     print("Program finished")
-    
 
 def paginate():
     logger = Log(Settings.local_output_files_url, "gather_live_links")
@@ -62,7 +61,7 @@ def paginate():
         dataset_metadata_list = datasets[set_index].file_metadata_list[::]
         datasets[set_index].file_metadata_list = sorted(dataset_metadata_list, key=lambda metadata:metadata.sequence)
     
-    for set_index in range(Settings.dataset_count):  #Now that all dataset's file sequences are sorted, we can compare the last file in the current dataset to the first file in the next
+    for set_index in range(Settings.dataset_count):
         for metadata in datasets[set_index].file_metadata_list:
             all_files_metadata.append({
                 'dataset_index': set_index+1,

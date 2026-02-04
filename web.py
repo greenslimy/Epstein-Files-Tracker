@@ -5,6 +5,7 @@ from concurrent.futures import (
 import requests
 from bs4 import BeautifulSoup
 from file_listing import FileMetadata
+from settings import Settings
 
 class LivePaginationHandler:
 
@@ -25,13 +26,7 @@ class LivePaginationHandler:
 
         for page_index in page_batch:
             live_paginated_url = f"{self.live_pages_url_base}/data-set-{dataset_index}-files?page={page_index}"
-            page_list_data = requests.get(live_paginated_url, headers={
-                "sec-ch-ua": """"Brave";v="143", "Chromium";v="143", "Not A(Brand";v="24""",
-                "sec-ch-ua-mobile":"?0",
-                "sec-ch-ua-platform":"Windows",
-                "upgrade-insecure-requests":"1",
-                "user-agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
-            })
+            page_list_data = requests.get(live_paginated_url, headers=Settings.headers)
             pages_submitted.append(page_index)
 
             if(page_list_data.ok):

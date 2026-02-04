@@ -4,7 +4,7 @@ The Epstein File Tracker is an on-going project to assist in the preservation of
 
 You can find the public release of the documents [here](https://www.justice.gov/epstein/doj-disclosures).
 
-Note: The live_links.csv file included in the initial release of this repository was pulled at 10PM CST on 2/2/2026. This contains many duplicated links, as that is how they were presented on the website. It does, however, contain all links that were publically available across all datasets at the time.
+Note: The live_links.csv file included in the initial release of this repository was pulled at 10PM CST on 2/2/2026. This contains many duplicated links, as that is how they were presented on the website. It does, however, contain all links that were publicly available across all datasets at the time.
 
 ## Usage
 

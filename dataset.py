@@ -14,14 +14,6 @@ from concurrent.futures import (
 )
 from settings import Settings
 
-headers = {
-    "sec-ch-ua": """"Brave";v="143", "Chromium";v="143", "Not A(Brand";v="24""",
-    "sec-ch-ua-mobile":"?0",
-    "sec-ch-ua-platform":"Windows",
-    "upgrade-insecure-requests":"1",
-    "user-agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
-}
-
 class Dataset:
 
     def __init__(self, live_page_url_base, live_file_url_base, index):
