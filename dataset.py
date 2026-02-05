@@ -21,8 +21,8 @@ class Dataset:
         self.file_metadata_list:list[FileMetadata] = []
         self.live_paginated_url = f"{live_page_url_base}/data-set-{index}-files"
         self.live_files_url = f"{live_file_url_base}/DataSet {index}"
+        self.count_dataset_pages = Settings.dataset_pages[index]
         self.dataset_index = index
-        self.count_dataset_pages = Settings.dataset_pages[self.dataset_index]
 
     def paginate(self, logger:Log, paginator:LivePaginationHandler):
         batches_to_submit:dict[int, list[int]] = self._get_page_batches(5)
@@ -30,8 +30,7 @@ class Dataset:
         for batch_index, page_batch in batches_to_submit.items():
             submitted_batches.append(paginator.submit_pages(self, batch_index, page_batch))
 
-        while self.get_complete_pages_count() < self.count_dataset_pages:
-
+        while not self.is_complete():
             for processed_batch in as_completed(submitted_batches):
                 batch_result = processed_batch.result()             #Wait for the batch to finish reading each page
                 parsed_pages = batch_result.parsed_pages.result()   #Wait for those pages in the batch to be parsed
@@ -70,6 +69,9 @@ class Dataset:
     
     def get_complete_pages_count(self):
         return len(self.completed_pages)
+    
+    def is_complete(self):
+        return self.get_complete_pages_count() >= self.count_dataset_pages
 
     def create_pagination_thread(self, logger:Log, paginator:LivePaginationHandler):
         self.current_thread = threading.Thread(target=self.paginate, args=(logger,paginator,))

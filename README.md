@@ -10,13 +10,16 @@ Note: The live_links.csv file included in the initial release of this repository
 
 ```shell
 > python main.py -h
-usage: main.py [-h] -o LOCAL_OUTPUT [-f LOCAL_FILES] [--paginate]
+usage: main.py [-h] -o TRACKER_OUTPUT [-f EPSTEIN_FILES] [--paginate]
+
+Epstein Files Tracker
 
 options:
-  -h, --help       show this help message and exit
-  -o LOCAL_OUTPUT  Local location you would like output files to be written. Be sure to create a logs directory first!
-  -f LOCAL_FILES   Local location of your copy of the unzipped files
-  --paginate       Paginate and record links from the justice.gov live release of the files
+  -h, --help         show this help message and exit
+  -o TRACKER_OUTPUT  Local location you would like output files to be written. Be sure to create a logs directory first!
+                     Tracker will look here for input .csv files that were created by this program.
+  -f EPSTEIN_FILES   Local location of your copy of the unzipped Epstein Files (Under construction)
+  --paginate         Paginate and record links from the justice.gov live release of the files
 
 
 > python main.py -o path/to/output -f path/to/files --paginate
