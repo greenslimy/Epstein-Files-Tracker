@@ -3,6 +3,8 @@ from files_logging import Log
 import csv
 from queue import Queue
 from settings import Settings
+from file_listing import FileDescriptor
+from typing import Generator
 
 class CsvWriter:
 
@@ -29,7 +31,7 @@ class CsvWriter:
             for _ in range(rows_to_write):
                 self._writer.writerow(self.rows_queue.get())
             self.csv_file.flush()
-            time.sleep(8)
+            time.sleep(5)
 
             rows_to_write = self.rows_queue.qsize() #Recalculate number of rows to write after sleep
 
@@ -38,3 +40,25 @@ class CsvWriter:
 
     def close(self):
         self.program_completed = True
+
+class CsvReader():
+
+    def __init__(self, logger:Log, csv_file_name:str):
+        local_live_links_csv_path = f"{Settings.local_output_files_url}/{csv_file_name}.csv"
+        self.logger = logger
+
+        try:
+            self.csv_file = open(local_live_links_csv_path, mode='r', newline='', encoding='utf-8')
+        except FileNotFoundError:
+            self.logger.log(f"CSV file {local_live_links_csv_path} not found.")
+            raise
+
+        print(f"Reading process input from {local_live_links_csv_path}")
+        self._reader = csv.DictReader(self.csv_file)    #Headers will be inferred from the first row
+
+    def read_rows(self) -> Generator[tuple[int, FileDescriptor]]:
+        for row in self._reader:
+            yield FileDescriptor.from_row_data(row)
+
+    def close(self):
+        self.csv_file.close()

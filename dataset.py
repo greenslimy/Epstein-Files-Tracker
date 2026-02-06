@@ -1,7 +1,7 @@
 from files_logging import Log
 import threading
 from file_listing import (
-    FileMetadata
+    FileDescriptor
 )
 from web import (
     LivePaginationHandler,
@@ -14,30 +14,32 @@ from concurrent.futures import (
 )
 from settings import Settings
 
-class Dataset:
+class Dataset:  #TODO: Break this out into raw and cleaned datasets
 
     def __init__(self, live_page_url_base, live_file_url_base, index):
-        self.completed_pages:list[int] = []
-        self.file_metadata_list:list[FileMetadata] = []
+        self.raw_completed_pages:list[int] = []
+        self.raw_file_metadata_list:list[FileDescriptor] = []
+        self.clean_file_metadata_list:dict[int, FileDescriptor] = {}
         self.live_paginated_url = f"{live_page_url_base}/data-set-{index}-files"
         self.live_files_url = f"{live_file_url_base}/DataSet {index}"
         self.count_dataset_pages = Settings.dataset_pages[index]
         self.dataset_index = index
 
     def paginate(self, logger:Log, paginator:LivePaginationHandler):
+
         batches_to_submit:dict[int, list[int]] = self._get_page_batches(5)
         submitted_batches:list[Future[PageBatch]] = []
         for batch_index, page_batch in batches_to_submit.items():
             submitted_batches.append(paginator.submit_pages(self, batch_index, page_batch))
 
-        while not self.is_complete():
+        while not self.is_raw_complete():
             for processed_batch in as_completed(submitted_batches):
                 batch_result = processed_batch.result()             #Wait for the batch to finish reading each page
                 parsed_pages = batch_result.parsed_pages.result()   #Wait for those pages in the batch to be parsed
                 logger.log(f"Dataset {self.dataset_index} batch {batch_result.batch_index} processed - submitted: {len(batch_result.pages_submitted)} parsed: {len(parsed_pages)} failed: {len(batch_result.failed_pages)}")
                 for parsed_page_index, links_metadata in parsed_pages.items():
-                    self.file_metadata_list.extend(links_metadata)
-                    self.completed_pages.append(parsed_page_index)
+                    self.raw_file_metadata_list.extend(links_metadata)
+                    self.raw_completed_pages.append(parsed_page_index)
 
                 for failed_page_index, failure_detail in batch_result.failed_pages.items():
                     logger.log(f"Dataset {self.dataset_index} page {failed_page_index} failed: {failure_detail.failure_code} - {failure_detail.failure_reason}.")
@@ -45,7 +47,7 @@ class Dataset:
                     if(failure_detail.failure_code == 'rate_limited'):
                         paginator.rate_limited = True
 
-        logger.log(f"Enumerated {self.get_file_count()} links over {self.count_dataset_pages} pages in public dataset {self.dataset_index}.")
+        logger.log(f"Enumerated {self.get_raw_file_count()} links over {self.count_dataset_pages} pages in public dataset {self.dataset_index}.")
 
     def _get_page_batches(self, num_pages:int):     #This could be done better, but Im lazy
         batches_to_submit:dict[int, list[int]] = {}
@@ -64,15 +66,14 @@ class Dataset:
             batches_to_submit[batch_index] = batch_pages
         return batches_to_submit
 
-    def get_file_count(self):
-        return len(self.file_metadata_list)
+    def get_raw_file_count(self):
+        return len(self.raw_file_metadata_list)
     
-    def get_complete_pages_count(self):
-        return len(self.completed_pages)
+    def get_raw_complete_pages_count(self):
+        return len(self.raw_completed_pages)
     
-    def is_complete(self):
-        return self.get_complete_pages_count() >= self.count_dataset_pages
-
+    def is_raw_complete(self):
+        return self.get_raw_complete_pages_count() >= self.count_dataset_pages
     def create_pagination_thread(self, logger:Log, paginator:LivePaginationHandler):
         self.current_thread = threading.Thread(target=self.paginate, args=(logger,paginator,))
         return self.current_thread

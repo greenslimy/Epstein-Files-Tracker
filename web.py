@@ -4,7 +4,7 @@ from concurrent.futures import (
 )
 import requests
 from bs4 import BeautifulSoup
-from file_listing import FileMetadata
+from file_listing import FileDescriptor
 from settings import Settings
 
 class LivePaginationHandler:
@@ -40,7 +40,7 @@ class LivePaginationHandler:
 
 class PageBatch:
 
-    def __init__(self, batch_index:int, pages_submitted:list[int], parsed_pages:Future[dict[int, list[FileMetadata]]], failed_pages:dict[int, PageFailure]):
+    def __init__(self, batch_index:int, pages_submitted:list[int], parsed_pages:Future[dict[int, list[FileDescriptor]]], failed_pages:dict[int, PageFailure]):
         self.batch_index = batch_index
         self.pages_submitted = pages_submitted
         self.parsed_pages = parsed_pages
@@ -62,7 +62,7 @@ class _PaginationParsingHandler:
         return self._pool.submit(self._parse_documents_thread, documents)
     
     def _parse_documents_thread(self, documents:dict[int, str]):
-        links_metadata:dict[int, list[FileMetadata]] = {}
+        links_metadata:dict[int, list[FileDescriptor]] = {}
 
         for page_index, page_data in documents.items():
             document_links_metadata = []
@@ -81,7 +81,7 @@ class _PaginationParsingHandler:
                 file_type = split_file[1]
                 sequence_number = int(file_name[4:12])   #Should be 8 numbers succeeding EFTA, converted to an int, so it will strip leading 0s
 
-                document_links_metadata.append(FileMetadata(page_index, sequence_number, file_type, full_link))
+                document_links_metadata.append(FileDescriptor(page_index, sequence_number, file_type, full_link))
             
             links_metadata[page_index] = document_links_metadata
 

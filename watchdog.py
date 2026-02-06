@@ -23,11 +23,11 @@ class Pagination:
             for dataset in self.watched_datasets:
                 index = dataset.dataset_index
 
-                if(dataset.get_complete_pages_count() == dataset.count_dataset_pages):
+                if(dataset.get_raw_complete_pages_count() == dataset.count_dataset_pages):
                     if(index not in completed_paginations):
                         completed_paginations.append(index)
                     sys.stdout.write("\033[92m")
-                sys.stdout.write(f"\x1b[2K Dataset {index} - {dataset.get_complete_pages_count()}/{dataset.count_dataset_pages} pages - {dataset.get_file_count()} links")
+                sys.stdout.write(f"\x1b[2K Dataset {index} - {dataset.get_raw_complete_pages_count()}/{dataset.count_dataset_pages} pages - {dataset.get_raw_file_count()} links")
                 if(self.paginator.rate_limited):
                     sys.stdout.write("\033[91m\tRATE LIMITED\033[0m")
                 if(index < count_watched_datasets): sys.stdout.write("\n")
