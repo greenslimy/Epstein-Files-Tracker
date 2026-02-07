@@ -10,7 +10,7 @@ Note: The live_links.csv file included in the initial release of this repository
 
 ```shell
 > python main.py -h
-usage: main.py [-h] -o TRACKER_OUTPUT [-f EPSTEIN_FILES] [--paginate] [--cleanup]
+usage: main.py [-h] -o TRACKER_OUTPUT [-f EPSTEIN_FILES] [--paginate] [--clean]
 
 Epstein Files Tracker
 
@@ -20,7 +20,7 @@ options:
                      Tracker will look here for input .csv files that were created by this program.
   -f EPSTEIN_FILES   Local location of your copy of the unzipped Epstein Files (Under construction)
   --paginate         Paginate and record links from the justice.gov live release of the files
-  --cleanup          Clean up duplicates and sort links from a previously generated live_links_raw.csv file
+  --clean            Clean up duplicates and sort links from a previously generated live_links_raw.csv file
 
 
 > python main.py -o path/to/output -f path/to/files --paginate --cleanup

@@ -56,7 +56,7 @@ class CsvReader():
         print(f"Reading process input from {local_live_links_csv_path}")
         self._reader = csv.DictReader(self.csv_file)    #Headers will be inferred from the first row
 
-    def read_rows(self) -> Generator[tuple[int, FileDescriptor]]:
+    def read_rows(self) -> Generator[FileDescriptor]:
         for row in self._reader:
             yield FileDescriptor.from_row_data(row)
 

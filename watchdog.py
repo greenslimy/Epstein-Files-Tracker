@@ -21,22 +21,23 @@ class Pagination:
         print(f"Enumerating {count_watched_datasets} paginated lists of files...")
         while len(completed_paginations) < count_watched_datasets:
             for dataset in self.watched_datasets:
-                index = dataset.dataset_index
+                index = dataset.index
 
-                if(dataset.get_raw_complete_pages_count() == dataset.count_dataset_pages):
+                if(dataset.get_count_completed_pages() == dataset.count_dataset_pages):
                     if(index not in completed_paginations):
                         completed_paginations.append(index)
                     sys.stdout.write("\033[92m")
-                sys.stdout.write(f"\x1b[2K Dataset {index} - {dataset.get_raw_complete_pages_count()}/{dataset.count_dataset_pages} pages - {dataset.get_raw_file_count()} links")
-                if(self.paginator.rate_limited):
-                    sys.stdout.write("\033[91m\tRATE LIMITED\033[0m")
-                if(index < count_watched_datasets): sys.stdout.write("\n")
-
-                sys.stdout.write("\033[0m\r")   #Clear any color and return to the beginning of the line
-                sys.stdout.flush()
+                sys.stdout.write(f"\x1b[2K Dataset {index} - {dataset.get_count_completed_pages()}/{dataset.count_dataset_pages} pages parsed\033[0m\n")
 
             if(len(completed_paginations) < count_watched_datasets):
-                sys.stdout.write("\x1b[1A"*(count_watched_datasets-1))  #Move up x lines
+                sys.stdout.write(f"\x1b[2KPagination thread status: ")
+                if(self.paginator.rate_limited):
+                    sys.stdout.write("\033[91mRATE LIMITED\033[0m")
+                else:
+                    sys.stdout.write("\033[92mOK\033[0m")
+                sys.stdout.write("\x1b[1A"*(count_watched_datasets))  #Move up x lines to overwrite the previous status update
+                sys.stdout.write("\033[0m\r")   #Clear any color and return to the beginning of the line
+                sys.stdout.flush()
             else:
                 print("\nAll paginations complete! Waiting for this thread to end before continuing...")
                 break

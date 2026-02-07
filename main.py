@@ -1,13 +1,10 @@
 import threading
-from csv_file import (
-    CsvWriter,
-    CsvReader
-)
+from csv_file import CsvWriter, CsvReader
 from dataset import Dataset
+from file_listing import FileDescriptor
 import watchdog
 from files_logging import Log
-import csv
-from web import LivePaginationHandler
+from web import LivePaginationHandler, PaginationParsingHandler
 import argparse
 from settings import Settings
 from pathlib import Path
@@ -19,22 +16,22 @@ def main():
     argument_parser.add_argument('-o', dest="tracker_output", type=str, help="Local location you would like output files to be written. Be sure to create a logs directory first!\nTracker will look here for input .csv files that were created by this program.", required=True)
     argument_parser.add_argument('-f', dest="epstein_files", type=str, help="Local location of your copy of the unzipped Epstein Files (Under construction)")
     argument_parser.add_argument('--paginate', action="store_true", help="Paginate and record links from the justice.gov live release of the files")
-    argument_parser.add_argument('--cleanup', action="store_true", help="Clean up duplicates and sort links from a previously generated live_links_raw.csv file")
+    argument_parser.add_argument('--clean', action="store_true", help="Clean up duplicates and sort links from a previously generated live_links_raw.csv file")
     arguments = argument_parser.parse_args()
 
     Settings.local_output_files_url = arguments.tracker_output
     Settings.local_files_base_url = arguments.epstein_files
 
-    #Initialize datasets - TODO: Move this into the Dataset object when Clean and Raw datasets are implemented
+    #Initialize datasets
     for set_index in range(Settings.dataset_count):
         #if(Settings.dataset_pages[set_index+1] > 10): Settings.dataset_pages[set_index+1] = 10    #TODO: Debug clamp
-        datasets.append(Dataset(Settings.live_paginated_base_url, Settings.live_files_base_url, set_index+1))
+        datasets.append(Dataset(set_index+1))
     print(f"Initialized {len(datasets)} datasets")
 
     if(arguments.paginate):
         paginate()
 
-    if(arguments.cleanup):
+    if(arguments.clean):
         cleanup()
 
     print("Program finished")
@@ -46,43 +43,37 @@ def paginate():
     logging_thread = threading.Thread(target=logger.append_logs_thread)
     logging_thread.start()
 
-    pagination_handler = LivePaginationHandler(Settings.live_paginated_base_url)
+    successful_csv_writer = CsvWriter(logger, process_name, ['dataset_index', 'page_index', 'sequence_number', 'file_type', 'public_link'])
+    successful_csv_writer_thread = threading.Thread(target=successful_csv_writer.append_csv_thread)
+    successful_csv_writer_thread.start()
 
-    csv_writer = CsvWriter(logger, process_name, ['dataset_index', 'page_index', 'sequence_number', 'file_type', 'public_link'])
-    csv_writer_thread = threading.Thread(target=csv_writer.append_csv_thread)
-    csv_writer_thread.start()
+    failed_csv_writer = CsvWriter(logger, f"{process_name}_failed", ['dataset_index', 'page_index', 'http_status_code'])
+    failed_csv_writer_thread = threading.Thread(target=failed_csv_writer.append_csv_thread)
+    failed_csv_writer_thread.start()
 
-    pagination_watchdog = watchdog.Pagination(logger, pagination_handler, datasets)
+    pagination_parsing_handler = PaginationParsingHandler(logger)
+
+    pagination_url_handler = LivePaginationHandler(logger, pagination_parsing_handler, failed_csv_writer)
+    pagination_url_handler_thread = threading.Thread(target=pagination_url_handler.error_watcher)   #Watches for rate limiting and pauses pagination when it occurs
+    pagination_url_handler_thread.start()
+
+    pagination_watchdog = watchdog.Pagination(logger, pagination_url_handler, datasets)
     pagination_watchdog_thread = threading.Thread(target=pagination_watchdog.update)   #Keeps track of each dataset thread's progress and updates the console
     
     pagination_watchdog_thread.start()
-    for set_index in range(Settings.dataset_count):
-        dataset_thread = datasets[set_index].create_pagination_thread(logger, pagination_handler)
-        dataset_thread.start()
-        dataset_thread.join()           #Wait for each dataset to finish before moving on to the next one
+    for dataset in datasets:
+        dataset.set_logger(logger)   #Set the logger for each dataset so they can log their pagination progress
+        dataset.paginate(pagination_url_handler, successful_csv_writer)   #Start paginating each dataset. This will submit all the page URLs to the pagination handler, which will handle the multithreading and parsing of each page. The dataset threads will then wait for the pagination watchdog to confirm that all pages have been parsed before they finish.
+
     pagination_watchdog_thread.join()   #Wait for the watchdog to confirm all datasets have been paginated before continuing
 
-    count_pages = 0
-    count_files = 0
-    for set_index in range(Settings.dataset_count):
-        count_pages += datasets[set_index].count_dataset_pages
-        count_files += datasets[set_index].get_raw_file_count()
-    logger.log(f"Pagination completed - {count_files} links in {count_pages} pages across {Settings.dataset_count} datasets")
-    
-    #TODO: Write csv directly from the dataset as pagination threads complete
-    for set_index in range(Settings.dataset_count):
-        for metadata in datasets[set_index].raw_file_metadata_list:
-            csv_writer.rows_queue.put({
-                'dataset_index': set_index+1,
-                'page_index': metadata.page_index,
-                'sequence_number': metadata.sequence,
-                'file_type': metadata.type,
-                'public_link': metadata.public_link
-            })
+    logger.log(f"Pagination completed for all datasets. Check {successful_csv_writer.csv_file.name} for the list of links and {failed_csv_writer.csv_file.name} for any failed page requests.")
 
-    csv_writer.close()
+    successful_csv_writer.close()
+    failed_csv_writer.close()
     print("Finished buffering live links file. Waiting for writer thread to complete...")
-    csv_writer_thread.join()    #Wait for csv writing to complete
+    successful_csv_writer_thread.join()    #Wait for csv writing to complete
+    failed_csv_writer_thread.join()    #Wait for csv writing to complete
     
     logger.log("REMINDER: This file will likely contain many duplicates. This is how they were presented on the live justice.gov website.")
 
@@ -119,25 +110,24 @@ def cleanup():  #TODO: Look into pandas dataframes
     clean_csv_writer_thread = threading.Thread(target=clean_csv_writer.append_csv_thread)
     clean_csv_writer_thread.start()
 
-    print("Reading raw links file...")
-    for dataset_index, file_metadata in raw_csv_reader.read_rows():
-        datasets[dataset_index-1].raw_file_metadata_list.append(file_metadata)   #dataset_index is 1-based, list is 0-based
-    raw_csv_reader.close()
+    cleaned_metadata:dict[int, FileDescriptor] = {}   #Keyed by sequence number. We will assume that if there are duplicates, the one with the lowest page number is the correct one and ignore the rest.
 
-    print("Sorting datasets...")
-    for set_index in range(Settings.dataset_count): #Sort datasets
-        dataset_metadata_list = datasets[set_index].raw_file_metadata_list[::]
-        datasets[set_index].raw_file_metadata_list = sorted(dataset_metadata_list, key=lambda metadata:metadata.sequence)
-        
-    print("Beginning cleanup process...")
-    for set_index in range(Settings.dataset_count):
-        dataset = datasets[set_index]
-        for metadata in dataset.raw_file_metadata_list: #Since these were just sorted, we should be able to add uniques directly to the csv in the correct sequence
-            if(dataset.clean_file_metadata_list.get(metadata.sequence) is None):   #If we haven't seen this sequence number before, add it to the clean list
-                dataset.clean_file_metadata_list[metadata.sequence] = metadata
-                clean_csv_writer.rows_queue.put(metadata.get_row_data(dataset.dataset_index))
-            else:   #Otherwise, we've seen this sequence number before, ignore the new one but log the duplicate
-                logger.log(f"Dataset {set_index+1} sequence {metadata.sequence} duplicate ignored - Duplicate Page #{metadata.page_index} - Link: {metadata.public_link}")
+    print("Reading raw links file...")
+    for file_metadata in raw_csv_reader.read_rows():
+        if(cleaned_metadata.get(file_metadata.sequence) is None):   #If we haven't seen this sequence number before, add it to the clean list
+            cleaned_metadata[file_metadata.sequence] = file_metadata
+    raw_csv_reader.close()
+    
+    logger.log(f"Read {len(cleaned_metadata)} unique links from raw links file. Writing to clean links file and logging any duplicates found.")
+
+    print("Sorting and writing clean links file...")
+    cleaned_metadata = dict(sorted(cleaned_metadata.items()))
+
+    for _, file_metadata in cleaned_metadata.items():
+        if(file_metadata is not None):
+            clean_csv_writer.rows_queue.put(file_metadata.get_row_data())
+
+    print(f"Finished writing clean links file with {len(cleaned_metadata)} unique links.")
 
     clean_csv_writer.close()
     print("Finished buffering clean links file. Waiting for writer thread to complete...")

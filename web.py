@@ -1,88 +1,75 @@
-from concurrent.futures import (
-    ThreadPoolExecutor, 
-    Future
-)
+from concurrent.futures import ThreadPoolExecutor
+import time
 import requests
 from bs4 import BeautifulSoup
+from csv_file import CsvWriter
 from file_listing import FileDescriptor
+from files_logging import Log
 from settings import Settings
 
 class LivePaginationHandler:
 
     rate_limited = False
 
-    def __init__(self, live_pages_url_base):
-        self.live_pages_url_base = live_pages_url_base
-        self._pool = ThreadPoolExecutor(max_workers=8)
-        self._parser = _PaginationParsingHandler()
+    def __init__(self, logger:Log, parser:PaginationParsingHandler, failed_links_csv_writer:CsvWriter):
+        self.logger = logger
+        self._pool = ThreadPoolExecutor(max_workers=12)
+        self.parser = parser
+        self.failed_links_csv_writer = failed_links_csv_writer
 
-    def submit_pages(self, dataset, batch_index, page_batch:list[int]):
-        return self._pool.submit(self._poll_pages_thread, dataset.dataset_index, batch_index, page_batch)
+    def error_watcher(self):
+        while True:
+            if(self.rate_limited):
+                self.logger.log("Rate limited! Pausing pagination for 5 minutes...")
+                time.sleep(300)
+                self.rate_limited = False
+            time.sleep(5)
 
-    def _poll_pages_thread(self, dataset_index, batch_index, page_batch:list[int]):
-        pages_submitted:list[int] = []
-        polled_pages:dict[int, str] = {}
-        failed_pages:dict[int, PageFailure] = {}
+    def submit_url(self, dataset_index, page_index, url, on_parse_complete):
+        return self._pool.submit(self._poll_url_thread, dataset_index, page_index, url, on_parse_complete)
 
-        for page_index in page_batch:
-            live_paginated_url = f"{self.live_pages_url_base}/data-set-{dataset_index}-files?page={page_index}"
-            page_list_data = requests.get(live_paginated_url, headers=Settings.headers)
-            pages_submitted.append(page_index)
+    def _poll_url_thread(self, dataset_index, page_index, url, on_parse_complete=None):
+        response = requests.get(url, headers=Settings.headers)
 
-            if(page_list_data.ok):
-                polled_pages[page_index] = str(page_list_data.text) #Create a copy of the text data so the parser can handle it faster
-            elif(page_list_data.status_code == 429):
-                failed_pages[page_index] = PageFailure(page_index, 'rate_limited', "Rate Limited")
-            else:
-                failed_pages[page_index] = PageFailure(page_index, 'unknown', f"Unhandled status code {page_list_data.status_code} ({live_paginated_url})")
+        if(response.ok):
+            self.parser.submit_data(dataset_index, page_index, str(response.text), on_parse_complete) #Create a copy of the text data so the parser can handle it faster
+        elif(response.status_code == 404):
+            self.logger.log(f"URL {url} not found (404). Skipping...")
+            self.failed_links_csv_writer.rows_queue.put({'dataset_index': dataset_index, 'page_index': page_index, 'http_status_code': 404})
+        elif(response.status_code == 429):
+            self.rate_limited = True
+            self.logger.log(f"Rate limited on URL {url}. Resubmitting and pausing pagination...")
+            self.submit_url(dataset_index, page_index, url, on_parse_complete)   #Resubmit the URL so it will be processed after the pause
+        else:
+            self.logger.log(f"Unhandled status code {response.status_code} on URL {url}")
+            self.failed_links_csv_writer.rows_queue.put({'dataset_index': dataset_index, 'page_index': page_index, 'http_status_code': response.status_code})
 
-        return PageBatch(batch_index, pages_submitted, self._parser.submit_documents(polled_pages), failed_pages)
+class PaginationParsingHandler:
 
-class PageBatch:
+    def __init__(self, logger:Log):
+        self.logger = logger
+        self._pool = ThreadPoolExecutor(max_workers=6)
 
-    def __init__(self, batch_index:int, pages_submitted:list[int], parsed_pages:Future[dict[int, list[FileDescriptor]]], failed_pages:dict[int, PageFailure]):
-        self.batch_index = batch_index
-        self.pages_submitted = pages_submitted
-        self.parsed_pages = parsed_pages
-        self.failed_pages = failed_pages
-
-class PageFailure:
-
-    def __init__(self, page_index, fail_code, fail_reason):
-        self.page_index = page_index
-        self.failure_code = fail_code
-        self.failure_reason = fail_reason
-
-class _PaginationParsingHandler:
-
-    def __init__(self):
-        self._pool = ThreadPoolExecutor(max_workers=5)
-
-    def submit_documents(self, documents:dict[int, str]):
-        return self._pool.submit(self._parse_documents_thread, documents)
+    def submit_data(self, dataset_index, page_index, document:str, on_parse_complete):
+        return self._pool.submit(self._parse_document_thread, dataset_index, page_index, document, on_parse_complete)
     
-    def _parse_documents_thread(self, documents:dict[int, str]):
-        links_metadata:dict[int, list[FileDescriptor]] = {}
+    def _parse_document_thread(self, dataset_index, page_index, document:str, on_parse_complete):
+        links_metadata:list[FileDescriptor] = []
 
-        for page_index, page_data in documents.items():
-            document_links_metadata = []
+        soup = BeautifulSoup(document, 'html.parser')
+        content_items = soup.find_all("span", class_="field-content")
+        links = []
+        for content in content_items:
+            links.append(content.contents[0])
 
-            soup = BeautifulSoup(page_data, 'html.parser')
-            content_items = soup.find_all("span", class_="field-content")
-            links = []
-            for content in content_items:
-                links.append(content.contents[0])
+        for link in links:  #Iterate through each link and pull the name, then add it to our list
+            full_file_name = link.string
+            full_link = f"{link['href']}"
+            split_file = full_file_name.split('.')
+            file_name = split_file[0]
+            file_type = split_file[1]
+            sequence_number = int(file_name[4:12])   #Should be 8 numbers succeeding EFTA, converted to an int, so it will strip leading 0s
 
-            for link in links:  #Iterate through each link and pull the name, then add it to our list
-                full_file_name = link.string
-                full_link = f"https://justice.gov{link['href']}"
-                split_file = full_file_name.split('.')
-                file_name = split_file[0]
-                file_type = split_file[1]
-                sequence_number = int(file_name[4:12])   #Should be 8 numbers succeeding EFTA, converted to an int, so it will strip leading 0s
+            links_metadata.append(FileDescriptor(dataset_index, page_index, sequence_number, file_type, full_link))
 
-                document_links_metadata.append(FileDescriptor(page_index, sequence_number, file_type, full_link))
-            
-            links_metadata[page_index] = document_links_metadata
-
-        return links_metadata
+        on_parse_complete(links_metadata)
