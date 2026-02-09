@@ -2,13 +2,13 @@ from dataset import Dataset
 import sys
 import time
 from files_logging import Log
-from web import LivePaginationHandler
+from web import WebRequestHandler
 
 class Pagination:
 
     watched_datasets:list[Dataset] = []
 
-    def __init__(self, logger:Log, paginator:LivePaginationHandler, datasets):
+    def __init__(self, logger:Log, paginator:WebRequestHandler, datasets):
         self.logger = logger
         self.paginator = paginator
         self.watched_datasets = datasets

@@ -1,3 +1,7 @@
+from pathlib import Path
+from settings import Settings
+
+
 class FileDescriptor:
 
     def __init__(self, dataset_index, page_index, sequence_number, file_type, public_link):
@@ -24,4 +28,26 @@ class FileDescriptor:
             'sequence_number': self.sequence,
             'file_type': self.type,
             'public_link': self.public_link
+        }
+    
+    def does_local_file_exist(self) -> bool:
+        local_file_path = f"{Settings.local_files_base_url}/DataSet {self.dataset_index}/EFTA{self.sequence:08d}.{self.type}"
+        return Path(local_file_path).is_file()
+    
+class EpsteinFile:
+
+    def __init__(self, sequence:int, file_name:str, num_bytes:int, length:float, unit_of_measure:str):
+        self.sequence = sequence
+        self.file_name = file_name
+        self.num_bytes = num_bytes
+        self.length = length
+        self.unit_of_measure = unit_of_measure
+
+    def get_row_data(self) -> dict:
+        return {
+            'sequence_number': self.sequence,
+            'file_name': self.file_name,
+            'num_bytes': self.num_bytes,
+            'length': self.length,
+            'unit_of_measure': self.unit_of_measure
         }

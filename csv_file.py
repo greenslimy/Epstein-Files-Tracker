@@ -56,9 +56,19 @@ class CsvReader():
         print(f"Reading process input from {local_live_links_csv_path}")
         self._reader = csv.DictReader(self.csv_file)    #Headers will be inferred from the first row
 
-    def read_rows(self) -> Generator[FileDescriptor]:
+    def read_all_rows(self) -> Generator[FileDescriptor]:
         for row in self._reader:
             yield FileDescriptor.from_row_data(row)
+
+    def read_rows_chunked(self, chunk_size:int) -> Generator[list[FileDescriptor]]:
+        chunk:list[FileDescriptor] = []
+        for row in self._reader:
+            chunk.append(FileDescriptor.from_row_data(row))
+            if(len(chunk) >= chunk_size):
+                yield chunk
+                chunk = []
+        if(len(chunk) > 0):
+            yield chunk
 
     def close(self):
         self.csv_file.close()

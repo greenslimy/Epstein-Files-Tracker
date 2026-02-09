@@ -7,7 +7,7 @@ from file_listing import FileDescriptor
 from files_logging import Log
 from settings import Settings
 
-class LivePaginationHandler:
+class WebRequestHandler:
 
     rate_limited = False
 
@@ -20,15 +20,16 @@ class LivePaginationHandler:
     def error_watcher(self):
         while True:
             if(self.rate_limited):
-                self.logger.log("Rate limited! Pausing pagination for 5 minutes...")
+                self.logger.log("Rate limited! Pausing requests for 5 minutes...")
+                #TODO: Pause the requests
                 time.sleep(300)
                 self.rate_limited = False
             time.sleep(5)
 
-    def submit_url(self, dataset_index, page_index, url, on_parse_complete):
-        return self._pool.submit(self._poll_url_thread, dataset_index, page_index, url, on_parse_complete)
+    def submit_pagination_url(self, dataset_index, page_index, url, on_parse_complete):
+        return self._pool.submit(self._poll_pagination_url_thread, dataset_index, page_index, url, on_parse_complete)
 
-    def _poll_url_thread(self, dataset_index, page_index, url, on_parse_complete=None):
+    def _poll_pagination_url_thread(self, dataset_index, page_index, url, on_parse_complete=None):
         response = requests.get(url, headers=Settings.headers)
 
         if(response.ok):
@@ -39,7 +40,7 @@ class LivePaginationHandler:
         elif(response.status_code == 429):
             self.rate_limited = True
             self.logger.log(f"Rate limited on URL {url}. Resubmitting and pausing pagination...")
-            self.submit_url(dataset_index, page_index, url, on_parse_complete)   #Resubmit the URL so it will be processed after the pause
+            self.submit_pagination_url(dataset_index, page_index, url, on_parse_complete)   #Resubmit the URL so it will be processed after the pause
         else:
             self.logger.log(f"Unhandled status code {response.status_code} on URL {url}")
             self.failed_links_csv_writer.rows_queue.put({'dataset_index': dataset_index, 'page_index': page_index, 'http_status_code': response.status_code})

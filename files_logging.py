@@ -2,16 +2,18 @@ from queue import Queue
 import time
 from datetime import datetime
 
+from settings import Settings
+
 class Log:
     program_completed = False
 
-    def __init__(self, log_files_location, program_name):
+    def __init__(self, program_name):
         self.logs_queue = Queue()
 
         try:
-            self.log_file = open(f"{log_files_location}/logs/{program_name}.log", "x")
+            self.log_file = open(f"{Settings.local_output_files_url}/logs/{program_name}.log", "x")
         except FileExistsError:
-            self.log_file = open(f"{log_files_location}/logs/{program_name}.log", "w")
+            self.log_file = open(f"{Settings.local_output_files_url}/logs/{program_name}.log", "w")
 
         print(f"Writing log output to {self.log_file.name}")
 
