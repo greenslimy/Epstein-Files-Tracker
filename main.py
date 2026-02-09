@@ -18,7 +18,7 @@ def main():
     argument_parser.add_argument('-f', dest="epstein_files", type=str, help="Local location of your copy of the unzipped Epstein Files")
     argument_parser.add_argument('--paginate', action="store_true", help="Paginate and record links from the justice.gov live release of the files")
     argument_parser.add_argument('--clean', action="store_true", help="Clean up duplicates and sort links from a previously generated live_links_raw.csv file")
-    argument_parser.add_argument('--tabulate', action="store_true", help="Tabulate local files to get file statistics like byte size and length")
+    argument_parser.add_argument('--tabulate', action="store_true", help="Tabulate local files to get file statistics like byte size and length. Requires the -f path to be set.")
     arguments = argument_parser.parse_args()
 
     Settings.local_output_files_url = arguments.tracker_output
