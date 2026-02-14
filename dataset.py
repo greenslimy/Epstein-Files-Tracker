@@ -15,12 +15,17 @@ class Dataset:
     def paginate(self, paginator:WebRequestHandler, successful_links_csv_writer:CsvWriter):
         for page_index in range(self.count_dataset_pages):
             live_paginated_url = f"{Settings.live_paginated_base_url}/data-set-{self.index}-files?page={page_index}"
-            paginator.submit_pagination_url(self.index, page_index, live_paginated_url, lambda links_metadata, page_index=page_index: self._on_page_parsed(page_index, links_metadata, successful_links_csv_writer))
+            paginator.submit_url(live_paginated_url, lambda links_metadata, page_index=page_index: self._on_page_parsed(page_index, links_metadata, successful_links_csv_writer))
 
-    def _on_page_parsed(self, page_index, links_metadata:list[FileDescriptor], successful_links_csv_writer:CsvWriter):
+    def _on_page_parsed(self, page_index, links_metadata:list[tuple[int, str, str]], successful_links_csv_writer:CsvWriter):
         for metadata in links_metadata:
-            metadata.page_index = page_index
-            successful_links_csv_writer.rows_queue.put(metadata.get_row_data())
+            successful_links_csv_writer.rows_queue.put({
+                'dataset_index': self.index,
+                'page_index': page_index,
+                'sequence_number': metadata[0],
+                'file_type': metadata[1],
+                'public_link': metadata[2]
+            })
         self.completed_pages.put(page_index)
         self.logger.log(f"Dataset {self.index} page {page_index} parsed with {len(links_metadata)} links.")
 

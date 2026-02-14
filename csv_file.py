@@ -3,8 +3,8 @@ from files_logging import Log
 import csv
 from queue import Queue
 from settings import Settings
-from file_listing import FileDescriptor
-from typing import Generator
+from file_listing import CsvEntry, FileDescriptor
+from typing import Generator, Generic, TypeVar
 
 class CsvWriter:
 
@@ -60,10 +60,11 @@ class CsvReader():
         for row in self._reader:
             yield FileDescriptor.from_row_data(row)
 
-    def read_rows_chunked(self, chunk_size:int) -> Generator[list[FileDescriptor]]:
-        chunk:list[FileDescriptor] = []
+    def read_rows_chunked(self, chunk_size:int) -> Generator[list[dict[str, str]]]:
+        chunk:list[dict[str, str]] = []
+
         for row in self._reader:
-            chunk.append(FileDescriptor.from_row_data(row))
+            chunk.append(row)
             if(len(chunk) >= chunk_size):
                 yield chunk
                 chunk = []

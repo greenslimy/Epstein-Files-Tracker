@@ -1,14 +1,15 @@
 import threading
 from csv_file import CsvWriter, CsvReader
 from dataset import Dataset
-from file_listing import EpsteinFile, FileDescriptor
+from file_listing import EpsteinFile, FileDescriptor, MissingFile
 from file_tabulate import get_file_info
 import watchdog
 from files_logging import Log
-from web import WebRequestHandler, PaginationParsingHandler
+from web import DownloadStatus, WebRequestHandler, PaginationParsingHandler
 import argparse
 from settings import Settings
 from pathlib import Path
+from concurrent.futures import as_completed
 
 datasets:list[Dataset] = []
 
@@ -19,6 +20,7 @@ def main():
     argument_parser.add_argument('--paginate', action="store_true", help="Paginate and record links from the justice.gov live release of the files")
     argument_parser.add_argument('--clean', action="store_true", help="Clean up duplicates and sort links from a previously generated live_links_raw.csv file")
     argument_parser.add_argument('--tabulate', action="store_true", help="Tabulate local files to get file statistics like byte size and length. Requires the -f path to be set.")
+    argument_parser.add_argument('--download', action="store_true", help="Download missing files from the justice.gov live release of the files")
     arguments = argument_parser.parse_args()
 
     Settings.local_output_files_url = arguments.tracker_output
@@ -42,6 +44,12 @@ def main():
         else:
             tabulate_local_files()
 
+    if(arguments.download):
+        if(Settings.local_files_base_url is None):
+            print("Local files base URL not set. Please provide the location of your local copy of the Epstein Files with the -f argument before running the download option.")
+        else:
+            download_missing_files()
+
     print("Program finished")
 
 def paginate():
@@ -55,7 +63,7 @@ def paginate():
     successful_csv_writer_thread = threading.Thread(target=successful_csv_writer.append_csv_thread)
     successful_csv_writer_thread.start()
 
-    failed_csv_writer = CsvWriter(logger, f"{process_name}_failed", ['dataset_index', 'page_index', 'http_status_code'])
+    failed_csv_writer = CsvWriter(logger, f"{process_name}_failed", ['url', 'http_status_code'])
     failed_csv_writer_thread = threading.Thread(target=failed_csv_writer.append_csv_thread)
     failed_csv_writer_thread.start()
 
@@ -168,7 +176,8 @@ def tabulate_local_files():
     for file_metadata in clean_csv_reader.read_rows_chunked(chunk_size=1000):   #Read in chunks to reduce disk usage
         chunk_index += 1
         logger.log(f"Tabulating chunk {chunk_index} with 1000 files...")
-        for metadata in file_metadata:
+        for metadata_raw in file_metadata:
+            metadata = FileDescriptor.from_row_data(metadata_raw)
             full_file_name = f"EFTA{metadata.sequence:08d}.{metadata.type}"
             if(metadata.does_local_file_exist()):
                 local_epstein_file_path = f"{Settings.local_files_base_url}/DataSet {metadata.dataset_index}/{full_file_name}"
@@ -197,6 +206,51 @@ def tabulate_local_files():
     print("Finished buffering log file. Waiting for writer thread to complete...")
     logging_thread.join()
 
+def download_missing_files():
+    process_name = "download_missing_files"
+
+    logger = Log(process_name)
+    logging_thread = threading.Thread(target=logger.append_logs_thread)
+    logging_thread.start()
+
+    missing_files_csv_reader = CsvReader(logger, "tabulate_local_files_missing")
+
+    #download_watchdog = watchdog.Download(logger, missing_files_csv_reader)
+    #download_watchdog_thread = threading.Thread(target=download_watchdog.update)   #Keeps track of the download progress and updates the console
+    #download_watchdog_thread.start()
+
+    failed_files_csv_writer = CsvWriter(logger, f"{process_name}_failed", ['url', 'http_status_code'])
+    failed_files_csv_writer_thread = threading.Thread(target=failed_files_csv_writer.append_csv_thread)
+    failed_files_csv_writer_thread.start()
+
+    download_url_handler = WebRequestHandler(logger, None, failed_files_csv_writer)
+    download_url_handler_thread = threading.Thread(target=download_url_handler.error_watcher)   #Watches for rate limiting and pauses downloads when it occurs
+    download_url_handler_thread.start()
+
+    print("Downloading missing files from justice.gov live links. Files will be processed in chunks of 100 to reduce memory usage.")
+    for file_metadata in missing_files_csv_reader.read_rows_chunked(chunk_size=100):   #Read in chunks to reduce disk usage
+        submissions = []
+        for metadata_raw in file_metadata:
+            metadata = MissingFile.from_row_data(metadata_raw)
+            submissions.append(download_url_handler.submit_url(metadata.public_link, lambda content, metadata=metadata: _write_file(logger, content, metadata)))    #TODO: Add a callback to write the file to disk once it's downloaded
+        
+        for future in as_completed(submissions):    #Waits for the disk to become inactive before continuing. Helpful for flash drives
+            result = future.result()
+            if(isinstance(result, DownloadStatus) and result.http_status_code != 200):
+                failed_files_csv_writer.rows_queue.put({
+                    'sequence_number': metadata.sequence,
+                    'file_name': metadata.file_name, 
+                    'local_file_path': metadata.local_file_path, 
+                    'public_link': metadata.public_link,
+                    'http_status_code': result.http_status_code
+                })
+
+def _write_file(logger, content, metadata):
+    local_epstein_file_path = metadata.local_file_path
+    with open(local_epstein_file_path, 'wb') as f:
+        f.write(content)
+        logger.log(f"Successfully downloaded file {metadata.public_link} to {local_epstein_file_path}")
+        return DownloadStatus(metadata.public_link, 200)
 
 if __name__ == '__main__':
     main()
