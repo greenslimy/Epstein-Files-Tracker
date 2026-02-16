@@ -2,14 +2,14 @@ import threading
 from csv_file import CsvWriter, CsvReader
 from dataset import Dataset
 from file_listing import EpsteinFile, FileDescriptor, MissingFile
-from file_tabulate import get_file_info
+from file_tabulate import FileTabulator, get_file_info
 import watchdog
 from files_logging import Log
 from web import DownloadStatus, WebRequestHandler, PaginationParsingHandler
 import argparse
 from settings import Settings
 from pathlib import Path
-from concurrent.futures import as_completed
+from concurrent.futures import Future, as_completed
 
 datasets:list[Dataset] = []
 
@@ -163,35 +163,30 @@ def tabulate_local_files():
 
     clean_csv_reader = CsvReader(logger, "live_links_clean")
 
-    tabulated_local_files_csv_writer = CsvWriter(logger, process_name, ['sequence_number', 'file_name', 'num_bytes', 'length', 'unit_of_measure'])
+    tabulated_local_files_csv_writer = CsvWriter(logger, process_name, ['dataset_index', 'sequence_number', 'file_name', 'num_bytes', 'length', 'unit_of_measure'])
     tabulated_local_files_csv_writer_thread = threading.Thread(target=tabulated_local_files_csv_writer.append_csv_thread)
     tabulated_local_files_csv_writer_thread.start()
+    #TODO: Remove the already tabulated files from the clean links file before processing, so we can skip the tabulation for those files and just focus on the missing ones. This will make the process much faster after the first run, since most of the files are already tabulated.
 
-    missing_local_files_csv_writer = CsvWriter(logger, f"{process_name}_missing", ['sequence_number', 'file_name', 'local_file_path', 'public_link'])
+    missing_local_files_csv_writer = CsvWriter(logger, f"{process_name}_missing", ['dataset_index', 'sequence_number', 'file_name', 'local_file_path', 'public_link'])
     missing_local_files_csv_writer_thread = threading.Thread(target=missing_local_files_csv_writer.append_csv_thread)
     missing_local_files_csv_writer_thread.start()
+    #TODO: Add a separate csv writer for missing local files, so we can keep track of which files are missing and which are just 0 bytes or have an unknown length. This will make it easier to identify which files we need to download later.
+
+    tabulator = FileTabulator(logger, tabulated_local_files_csv_writer, missing_local_files_csv_writer)
 
     print("Tabulating local files from cleaned links file. Files will be processed in chunks of 1000 files.")
     chunk_index = 0
-    for file_metadata in clean_csv_reader.read_rows_chunked(chunk_size=1000):   #Read in chunks to reduce disk usage
+    for file_metadata in clean_csv_reader.read_rows_chunked(chunk_size=1000):   #Read in chunks to reduce RAM usage
         chunk_index += 1
         logger.log(f"Tabulating chunk {chunk_index} with 1000 files...")
+        submissions:list[Future[bool]] = []
         for metadata_raw in file_metadata:
             metadata = FileDescriptor.from_row_data(metadata_raw)
-            full_file_name = f"EFTA{metadata.sequence:08d}.{metadata.type}"
-            if(metadata.does_local_file_exist()):
-                local_epstein_file_path = f"{Settings.local_files_base_url}/DataSet {metadata.dataset_index}/{full_file_name}"
-                file_statistics = get_file_info(local_epstein_file_path, metadata.type)
-                epstein_file = EpsteinFile(metadata.sequence, full_file_name, file_statistics[0], file_statistics[1], file_statistics[2])
-                tabulated_local_files_csv_writer.rows_queue.put(epstein_file.get_row_data())
-            else:
-                logger.log(f"Local file missing: {full_file_name}")
-                missing_local_files_csv_writer.rows_queue.put({
-                    'sequence_number': metadata.sequence,
-                    'file_name': full_file_name, 
-                    'local_file_path': f"{Settings.local_files_base_url}/DataSet {metadata.dataset_index}/{full_file_name}", 
-                    'public_link': metadata.public_link
-                })
+            submissions.append(tabulator.submit_file(metadata))
+
+        for(future) in as_completed(submissions):    #Wait for the chunk to finish processing before moving on to the next one
+            future.result()
 
     print("Finished tabulating local files. See log file for details.")
     clean_csv_reader.close()
@@ -229,14 +224,14 @@ def download_missing_files():
 
     print("Downloading missing files from justice.gov live links. Files will be processed in chunks of 100 to reduce memory usage.")
     for file_metadata in missing_files_csv_reader.read_rows_chunked(chunk_size=100):   #Read in chunks to reduce disk usage
-        submissions = []
+        submissions:list[Future[DownloadStatus]] = []
         for metadata_raw in file_metadata:
             metadata = MissingFile.from_row_data(metadata_raw)
             submissions.append(download_url_handler.submit_url(metadata.public_link, lambda content, metadata=metadata: _write_file(logger, content, metadata)))    #TODO: Add a callback to write the file to disk once it's downloaded
         
         for future in as_completed(submissions):    #Waits for the disk to become inactive before continuing. Helpful for flash drives
             result = future.result()
-            if(isinstance(result, DownloadStatus) and result.http_status_code != 200):
+            if(result.http_status_code != 200):
                 failed_files_csv_writer.rows_queue.put({
                     'sequence_number': metadata.sequence,
                     'file_name': metadata.file_name, 
